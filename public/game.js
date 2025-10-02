@@ -69,8 +69,8 @@ class DoodleDualsGame {
         
         // Create slingshot positions
         this.slingshots = {
-            player1: { x: 100, y: GAME_CONFIG.WORLD.height - 100, width: 20, height: 60 },
-            player2: { x: GAME_CONFIG.WORLD.width - 100, y: GAME_CONFIG.WORLD.height - 100, width: 20, height: 60 }
+            player1: { x: 100, y: GAME_CONFIG.WORLD.height - 200, width: 20, height: 60 },
+            player2: { x: GAME_CONFIG.WORLD.width - 100, y: GAME_CONFIG.WORLD.height - 200, width: 20, height: 60 }
         };
         
         // Start render loop
@@ -158,8 +158,8 @@ class DoodleDualsGame {
             // Determine body type and draw accordingly
             if (body.blockType) {
                 this.drawBlock(body);
-            } else if (body.isTreasure) {
-                this.drawTreasure(body);
+            } else if (body.isEgg) {
+                this.drawEgg(body);
             } else if (body.isProjectile) {
                 this.drawProjectile(body);
             }
@@ -189,6 +189,22 @@ class DoodleDualsGame {
                 this.ctx.strokeRect(-size.width/2, -size.height/2, size.width, size.height);
                 break;
                 
+            case 'horizontalBar':
+                this.ctx.fillStyle = '#9b59b6';
+                this.ctx.fillRect(-size.width/2, -size.height/2, size.width, size.height);
+                this.ctx.strokeStyle = '#8e44ad';
+                this.ctx.lineWidth = 2;
+                this.ctx.strokeRect(-size.width/2, -size.height/2, size.width, size.height);
+                break;
+                
+            case 'verticalBar':
+                this.ctx.fillStyle = '#e67e22';
+                this.ctx.fillRect(-size.width/2, -size.height/2, size.width, size.height);
+                this.ctx.strokeStyle = '#d35400';
+                this.ctx.lineWidth = 2;
+                this.ctx.strokeRect(-size.width/2, -size.height/2, size.width, size.height);
+                break;
+                
             case 'triangle':
                 this.ctx.fillStyle = '#2ecc71';
                 this.ctx.beginPath();
@@ -201,33 +217,41 @@ class DoodleDualsGame {
                 this.ctx.lineWidth = 2;
                 this.ctx.stroke();
                 break;
-                
-            case 'circle':
-                this.ctx.fillStyle = '#f39c12';
-                this.ctx.beginPath();
-                this.ctx.arc(0, 0, size.radius, 0, Math.PI * 2);
-                this.ctx.fill();
-                this.ctx.strokeStyle = '#e67e22';
-                this.ctx.lineWidth = 2;
-                this.ctx.stroke();
-                break;
         }
     }
 
-    drawTreasure(body) {
-        const size = GAME_CONFIG.BLOCK_SIZES.treasure;
+    drawEgg(body) {
+        const size = GAME_CONFIG.BLOCK_SIZES.egg;
         
-        // Draw sparkling treasure
-        this.ctx.fillStyle = '#f1c40f';
-        this.ctx.beginPath();
-        this.ctx.arc(0, 0, size.radius, 0, Math.PI * 2);
-        this.ctx.fill();
-        
-        // Add sparkle effect
-        this.ctx.fillStyle = '#fff';
-        this.ctx.font = '20px Arial';
-        this.ctx.textAlign = 'center';
-        this.ctx.fillText('💎', 0, 5);
+        if (body.isBroken) {
+            // Draw broken egg
+            this.ctx.fillStyle = '#8B4513';
+            this.ctx.beginPath();
+            this.ctx.arc(0, 0, size.radius, 0, Math.PI * 2);
+            this.ctx.fill();
+            
+            // Add crack lines
+            this.ctx.strokeStyle = '#654321';
+            this.ctx.lineWidth = 2;
+            this.ctx.beginPath();
+            this.ctx.moveTo(-size.radius/2, -size.radius/2);
+            this.ctx.lineTo(size.radius/2, size.radius/2);
+            this.ctx.moveTo(size.radius/2, -size.radius/2);
+            this.ctx.lineTo(-size.radius/2, size.radius/2);
+            this.ctx.stroke();
+        } else {
+            // Draw intact egg
+            this.ctx.fillStyle = '#f9f9f9';
+            this.ctx.beginPath();
+            this.ctx.arc(0, 0, size.radius, 0, Math.PI * 2);
+            this.ctx.fill();
+            
+            // Add egg pattern
+            this.ctx.fillStyle = '#f1c40f';
+            this.ctx.font = '20px Arial';
+            this.ctx.textAlign = 'center';
+            this.ctx.fillText('🥚', 0, 5);
+        }
     }
 
     drawProjectile(body) {
@@ -342,6 +366,12 @@ class DoodleDualsGame {
             case 'rectangle':
                 body = Matter.Bodies.rectangle(x, y, size.width, size.height, options);
                 break;
+            case 'horizontalBar':
+                body = Matter.Bodies.rectangle(x, y, size.width, size.height, options);
+                break;
+            case 'verticalBar':
+                body = Matter.Bodies.rectangle(x, y, size.width, size.height, options);
+                break;
             case 'triangle':
                 // Create triangle using vertices
                 const vertices = [
@@ -350,9 +380,6 @@ class DoodleDualsGame {
                     { x: size.width/2, y: size.height/2 }
                 ];
                 body = Matter.Bodies.fromVertices(x, y, vertices, options);
-                break;
-            case 'circle':
-                body = Matter.Bodies.circle(x, y, size.radius, options);
                 break;
         }
         
@@ -366,20 +393,60 @@ class DoodleDualsGame {
         return null;
     }
 
-    createTreasure(x, y) {
-        const size = GAME_CONFIG.BLOCK_SIZES.treasure;
+    createEgg(x, y) {
+        const size = GAME_CONFIG.BLOCK_SIZES.egg;
         const body = Matter.Bodies.circle(x, y, size.radius, {
-            restitution: 0.8,
-            friction: 0.5,
+            restitution: 0.3,
+            friction: 0.8,
+            density: 0.001, // Very light and fragile
             render: { fillStyle: '#f1c40f' }
         });
         
-        body.isTreasure = true;
+        body.isEgg = true;
         body.playerNumber = this.playerNumber;
+        body.health = 1; // Very fragile - breaks on any significant impact
         Matter.World.add(this.world, body);
         
         this.treasures[`player${this.playerNumber}`] = body;
+        
+        // Add collision detection for egg fragility
+        Matter.Events.on(this.engine, 'collisionStart', (event) => {
+            event.pairs.forEach(pair => {
+                const { bodyA, bodyB } = pair;
+                
+                if ((bodyA.isEgg || bodyB.isEgg) && !bodyA.isStatic && !bodyB.isStatic) {
+                    const egg = bodyA.isEgg ? bodyA : bodyB;
+                    const other = bodyA.isEgg ? bodyB : bodyA;
+                    
+                    // Check impact force
+                    if (other.speed > 2 || other.isProjectile) {
+                        this.breakEgg(egg);
+                    }
+                }
+            });
+        });
+        
         return body;
+    }
+
+    breakEgg(egg) {
+        if (egg.isBroken) return;
+        
+        egg.isBroken = true;
+        
+        // Visual crack effect
+        egg.render.fillStyle = '#8B4513';
+        
+        // Notify server and end game
+        const winnerNumber = egg.playerNumber === 1 ? 2 : 1;
+        this.socket.emit('treasureDestroyed', {
+            destroyedBy: winnerNumber,
+            eggPlayer: egg.playerNumber
+        });
+        
+        setTimeout(() => {
+            Matter.World.remove(this.world, egg);
+        }, 1000);
     }
 
     getBlockColor(type) {
@@ -387,7 +454,8 @@ class DoodleDualsGame {
             square: '#e74c3c',
             rectangle: '#3498db',
             triangle: '#2ecc71',
-            circle: '#f39c12'
+            horizontalBar: '#9b59b6',
+            verticalBar: '#e67e22'
         };
         return colors[type] || '#fff';
     }
@@ -418,7 +486,7 @@ class DoodleDualsGame {
         if (!this.myTurn || this.projectile) return;
         
         const slingshot = this.slingshots[`player${this.playerNumber}`];
-        const velocity = power * 0.5; // Scale down for better gameplay
+        const velocity = power * 0.8; // Increased power multiplier
         const velocityX = Math.cos(angle) * velocity;
         const velocityY = Math.sin(angle) * velocity;
         
@@ -435,11 +503,12 @@ class DoodleDualsGame {
         Matter.World.add(this.world, this.projectile);
         Matter.Body.setVelocity(this.projectile, { x: velocityX, y: velocityY });
         
-        // Send shot to server
+        // Send shot to server with more data for synchronization
         this.socket.emit('shoot', {
             power: power,
             angle: angle,
-            velocity: { x: velocityX, y: velocityY }
+            velocity: { x: velocityX, y: velocityY },
+            startPos: { x: slingshot.x, y: slingshot.y - 30 }
         });
         
         // Remove projectile after some time
@@ -448,7 +517,7 @@ class DoodleDualsGame {
                 Matter.World.remove(this.world, this.projectile);
                 this.projectile = null;
             }
-        }, 5000);
+        }, 8000); // Longer time for increased range
     }
 
     // Event handlers
@@ -569,9 +638,9 @@ class DoodleDualsGame {
             return;
         }
         
-        // Create block
-        const block = this.selectedBlockType === 'treasure' ? 
-            this.createTreasure(this.mouse.x, this.mouse.y) :
+        // Create block or egg
+        const block = this.selectedBlockType === 'egg' ? 
+            this.createEgg(this.mouse.x, this.mouse.y) :
             this.createBlock(this.selectedBlockType, this.mouse.x, this.mouse.y);
         
         if (block) {
@@ -580,7 +649,7 @@ class DoodleDualsGame {
             this.updateBlockCountDisplay();
             
             // Send to server
-            const eventType = this.selectedBlockType === 'treasure' ? 'placeTreasure' : 'placeBlock';
+            const eventType = this.selectedBlockType === 'egg' ? 'placeTreasure' : 'placeBlock';
             this.socket.emit(eventType, {
                 type: this.selectedBlockType,
                 x: this.mouse.x,
@@ -609,16 +678,19 @@ class DoodleDualsGame {
 
     updateSlingshotAim() {
         const slingshot = this.slingshots[`player${this.playerNumber}`];
-        const dx = this.mouse.x - slingshot.x;
-        const dy = this.mouse.y - slingshot.y;
+        const dx = slingshot.x - this.mouse.x; // Inverted
+        const dy = slingshot.y - this.mouse.y; // Inverted
         
         this.slingshotAngle = Math.atan2(dy, dx);
-        this.slingshotPower = Math.min(Math.sqrt(dx*dx + dy*dy) / 5, GAME_CONFIG.SLINGSHOT.maxPower);
+        this.slingshotPower = Math.min(Math.sqrt(dx*dx + dy*dy) / 3, GAME_CONFIG.SLINGSHOT.maxPower);
         
-        // Calculate trajectory preview
-        const velocityX = Math.cos(this.slingshotAngle) * this.slingshotPower * 0.5;
-        const velocityY = Math.sin(this.slingshotAngle) * this.slingshotPower * 0.5;
+        // Calculate trajectory preview with inverted direction
+        const velocityX = Math.cos(this.slingshotAngle) * this.slingshotPower * 0.8;
+        const velocityY = Math.sin(this.slingshotAngle) * this.slingshotPower * 0.8;
         this.trajectoryPoints = this.calculateTrajectory(slingshot.x, slingshot.y - 30, velocityX, velocityY);
+        
+        // Update power indicator visual
+        this.updatePowerIndicator();
         
         // Update UI
         this.updateSlingshotUI();
@@ -629,6 +701,7 @@ class DoodleDualsGame {
         
         this.isDraggingSlingshot = false;
         this.trajectoryPoints = [];
+        this.removePowerIndicator(); // Remove visual indicator
         
         if (this.slingshotPower > 2) { // Minimum power threshold
             this.shoot(this.slingshotPower, this.slingshotAngle);
@@ -660,6 +733,44 @@ class DoodleDualsGame {
                 countElement.textContent = this.blockCounts[type];
             }
         });
+    }
+
+    updatePowerIndicator() {
+        const slingshot = this.slingshots[`player${this.playerNumber}`];
+        
+        // Remove existing power indicator
+        const existingIndicator = document.querySelector('.power-indicator');
+        if (existingIndicator) {
+            existingIndicator.remove();
+        }
+        
+        // Create new power indicator
+        const indicator = document.createElement('div');
+        indicator.className = 'power-indicator';
+        
+        // Set power level class
+        if (this.slingshotPower < 12) {
+            indicator.classList.add('power-low');
+        } else if (this.slingshotPower < 25) {
+            indicator.classList.add('power-medium');
+        } else {
+            indicator.classList.add('power-high');
+        }
+        
+        // Position indicator at slingshot
+        const canvasRect = this.canvas.getBoundingClientRect();
+        indicator.style.position = 'absolute';
+        indicator.style.left = (canvasRect.left + slingshot.x - 30) + 'px';
+        indicator.style.top = (canvasRect.top + slingshot.y - 30) + 'px';
+        
+        document.body.appendChild(indicator);
+    }
+
+    removePowerIndicator() {
+        const indicator = document.querySelector('.power-indicator');
+        if (indicator) {
+            indicator.remove();
+        }
     }
 
     updateSlingshotUI() {
@@ -709,7 +820,7 @@ class DoodleDualsGame {
         
         this.socket.on('treasurePlaced', (data) => {
             if (data.playerId !== this.socket.id) {
-                this.createTreasure(data.treasure.x, data.treasure.y);
+                this.createEgg(data.treasure.x, data.treasure.y);
             }
         });
         
@@ -817,8 +928,25 @@ class DoodleDualsGame {
     }
 
     showOpponentShot(data) {
-        // Visual feedback for opponent's shot
-        console.log('Opponent shot:', data);
+        // Create visual opponent projectile
+        const opponentProjectile = Matter.Bodies.circle(data.startPos.x, data.startPos.y, 8, {
+            restitution: 0.6,
+            friction: 0.3,
+            frictionAir: 0.01
+        });
+        
+        opponentProjectile.isProjectile = true;
+        opponentProjectile.playerNumber = data.playerNumber;
+        
+        Matter.World.add(this.world, opponentProjectile);
+        Matter.Body.setVelocity(opponentProjectile, data.velocity);
+        
+        // Remove after time
+        setTimeout(() => {
+            if (opponentProjectile) {
+                Matter.World.remove(this.world, opponentProjectile);
+            }
+        }, 8000);
     }
 
     showGameOver(data) {

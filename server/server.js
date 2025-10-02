@@ -181,7 +181,9 @@ io.on('connection', (socket) => {
     io.to(socket.roomCode).emit('shot', {
       playerId: socket.id,
       playerNumber: player.playerNumber,
-      trajectory: data
+      trajectory: data,
+      startPos: data.startPos,
+      velocity: data.velocity
     });
     
     // Switch turns after a delay (to allow shot to complete)
@@ -200,7 +202,7 @@ io.on('connection', (socket) => {
     
     io.to(socket.roomCode).emit('gameOver', {
       winner: winnerNumber,
-      reason: 'treasure_destroyed'
+      reason: 'egg_destroyed'
     });
   });
 

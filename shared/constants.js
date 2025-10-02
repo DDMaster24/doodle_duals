@@ -9,8 +9,9 @@ const GAME_CONFIG = {
     square: 3,
     triangle: 3,
     rectangle: 3,
-    circle: 3,
-    treasure: 1
+    horizontalBar: 2,
+    verticalBar: 2,
+    egg: 1
   },
   
   // Physics settings
@@ -34,18 +35,17 @@ const GAME_CONFIG = {
     square: { width: 40, height: 40 },
     rectangle: { width: 60, height: 30 },
     triangle: { width: 40, height: 40 },
-    circle: { radius: 20 },
-    treasure: { radius: 15 }
+    horizontalBar: { width: 80, height: 15 },
+    verticalBar: { width: 15, height: 80 },
+    egg: { radius: 18 }
   },
-  
+
   // Slingshot settings
   SLINGSHOT: {
-    maxPower: 20,
-    position: { x: 100, y: 500 }, // Player 1 position
-    position2: { x: 1100, y: 500 } // Player 2 position
-  },
-  
-  // Game states
+    maxPower: 35,
+    position: { x: 100, y: 400 }, // Player 1 position (raised)
+    position2: { x: 1100, y: 400 } // Player 2 position (raised)
+  },  // Game states
   GAME_STATES: {
     WAITING: 'waiting',
     BUILDING: 'building',
