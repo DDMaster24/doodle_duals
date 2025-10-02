@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Doodle Duals - Multiplayer Physics Game</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Game Container -->
+    <div id="gameContainer">
+        <!-- UI Overlay -->
+        <div id="uiOverlay">
+            <!-- Main Menu -->
+            <div id="mainMenu" class="screen active">
+                <h1>🎮 Doodle Duals</h1>
+                <p>Multiplayer Physics Battle Game</p>
+                <div class="menu-buttons">
+                    <button id="createRoomBtn" class="btn primary">Create Room</button>
+                    <button id="joinRoomBtn" class="btn secondary">Join Room</button>
+                </div>
+                <div id="joinRoomForm" class="hidden">
+                    <input type="text" id="roomCodeInput" placeholder="Enter Room Code" maxlength="6">
+                    <button id="joinRoomSubmit" class="btn primary">Join</button>
+                </div>
+            </div>
+
+            <!-- Lobby Screen -->
+            <div id="lobbyScreen" class="screen">
+                <h2>Room: <span id="displayRoomCode"></span></h2>
+                <p>Share this code with your friend!</p>
+                <div id="playersStatus">
+                    <div class="player-status">
+                        <span>Player 1: </span>
+                        <span id="player1Status">Waiting...</span>
+                    </div>
+                    <div class="player-status">
+                        <span>Player 2: </span>
+                        <span id="player2Status">Waiting...</span>
+                    </div>
+                </div>
+                <button id="readyBtn" class="btn primary hidden">Ready!</button>
+                <div id="connectionStatus">Waiting for players...</div>
+            </div>
+
+            <!-- Coin Flip Screen -->
+            <div id="coinFlipScreen" class="screen">
+                <h2>🪙 Coin Flip</h2>
+                <div id="coinAnimation">
+                    <div class="coin"></div>
+                </div>
+                <p id="coinFlipResult"></p>
+            </div>
+
+            <!-- Build Phase HUD -->
+            <div id="buildPhaseHUD" class="hud hidden">
+                <div class="phase-info">
+                    <h3>🏗️ Build Phase</h3>
+                    <div id="buildTimer">30s</div>
+                </div>
+                <div id="blockInventory">
+                    <div class="block-type" data-type="square">
+                        <div class="block-icon square-icon"></div>
+                        <span class="block-count" id="squareCount">3</span>
+                    </div>
+                    <div class="block-type" data-type="rectangle">
+                        <div class="block-icon rectangle-icon"></div>
+                        <span class="block-count" id="rectangleCount">3</span>
+                    </div>
+                    <div class="block-type" data-type="triangle">
+                        <div class="block-icon triangle-icon"></div>
+                        <span class="block-count" id="triangleCount">3</span>
+                    </div>
+                    <div class="block-type" data-type="circle">
+                        <div class="block-icon circle-icon"></div>
+                        <span class="block-count" id="circleCount">3</span>
+                    </div>
+                    <div class="block-type" data-type="treasure">
+                        <div class="block-icon treasure-icon">💎</div>
+                        <span class="block-count" id="treasureCount">1</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Battle Phase HUD -->
+            <div id="battlePhaseHUD" class="hud hidden">
+                <div class="phase-info">
+                    <h3>⚔️ Battle Phase</h3>
+                    <div id="currentTurn">Player 1's Turn</div>
+                </div>
+                <div id="slingshotControls">
+                    <div>Power: <span id="powerDisplay">0</span></div>
+                    <div>Angle: <span id="angleDisplay">0°</span></div>
+                </div>
+            </div>
+
+            <!-- Game Over Screen -->
+            <div id="gameOverScreen" class="screen">
+                <h2 id="gameOverTitle">Game Over!</h2>
+                <p id="gameOverMessage"></p>
+                <button id="playAgainBtn" class="btn primary">Play Again</button>
+                <button id="mainMenuBtn" class="btn secondary">Main Menu</button>
+            </div>
+
+            <!-- Error Messages -->
+            <div id="errorMessage" class="error-popup hidden">
+                <p id="errorText"></p>
+                <button id="closeError" class="btn">OK</button>
+            </div>
+        </div>
+
+        <!-- Game Canvas -->
+        <canvas id="gameCanvas" width="1200" height="600"></canvas>
+    </div>
+
+    <!-- Include Matter.js physics engine -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+    <!-- Include Socket.io for multiplayer -->
+    <script src="/socket.io/socket.io.js"></script>
+    <!-- Include shared constants -->
+    <script src="/shared/constants.js"></script>
+    <!-- Main game script -->
+    <script src="game.js"></script>
+</body>
+</html>
