@@ -4,41 +4,81 @@ class DoodleDualsGame {
         this.canvas = document.getElementById('gameCanvas');
         this.ctx = this.canvas.getContext('2d');
         this.socket = io();
-        
+
         // Game state
         this.gameState = GAME_CONFIG.GAME_STATES.WAITING;
         this.playerNumber = null;
         this.roomCode = null;
         this.currentPlayer = 1;
         this.myTurn = false;
-        
+
         // Building state
         this.selectedBlockType = null;
         this.blockCounts = { ...GAME_CONFIG.BLOCKS_PER_PLAYER };
         this.buildTimeLeft = 0;
-        
+
         // Physics world
         this.engine = null;
         this.world = null;
         this.render = null;
         this.mouseConstraint = null;
-        
+
         // Game objects
         this.blocks = [];
         this.treasures = { player1: null, player2: null };
         this.slingshot = null;
         this.projectile = null;
         this.trajectoryPoints = [];
-        
+
         // Mouse/touch state
         this.mouse = { x: 0, y: 0, isDown: false };
         this.slingshotPower = 0;
         this.slingshotAngle = 0;
         this.isDraggingSlingshot = false;
-        
+
         this.initializePhysics();
         this.setupEventListeners();
         this.setupSocketListeners();
+        this.checkForReconnection();
+    }
+
+    checkForReconnection() {
+        // Check if there's a previous session to reconnect to
+        const sessionData = localStorage.getItem('doodleDualsSession');
+        if (sessionData) {
+            try {
+                const session = JSON.parse(sessionData);
+                const now = Date.now();
+
+                // Only attempt reconnection if session is less than 25 seconds old
+                if (now - session.timestamp < 25000) {
+                    console.log('Attempting to reconnect to previous session...');
+                    this.socket.emit('reconnectToRoom', {
+                        roomCode: session.roomCode,
+                        previousSocketId: session.socketId
+                    });
+                } else {
+                    localStorage.removeItem('doodleDualsSession');
+                }
+            } catch (e) {
+                console.error('Error parsing session data:', e);
+                localStorage.removeItem('doodleDualsSession');
+            }
+        }
+    }
+
+    saveSession() {
+        if (this.roomCode && this.socket.id) {
+            localStorage.setItem('doodleDualsSession', JSON.stringify({
+                roomCode: this.roomCode,
+                socketId: this.socket.id,
+                timestamp: Date.now()
+            }));
+        }
+    }
+
+    clearSession() {
+        localStorage.removeItem('doodleDualsSession');
     }
 
     initializePhysics() {
@@ -795,13 +835,42 @@ class DoodleDualsGame {
         this.socket.on('roomCreated', (data) => {
             this.roomCode = data.roomCode;
             this.playerNumber = data.playerNumber;
+            this.saveSession();
             this.showLobby();
         });
-        
+
         this.socket.on('roomJoined', (data) => {
             this.roomCode = data.roomCode;
             this.playerNumber = data.playerNumber;
+            this.saveSession();
             this.showLobby();
+        });
+
+        this.socket.on('reconnected', (data) => {
+            console.log('Successfully reconnected!');
+            this.roomCode = data.roomCode;
+            this.playerNumber = data.playerNumber;
+            this.gameState = data.gameState;
+            this.currentPlayer = data.currentPlayer;
+            this.myTurn = (this.currentPlayer === this.playerNumber);
+            this.saveSession();
+
+            // Show appropriate screen based on game state
+            if (this.gameState === GAME_CONFIG.GAME_STATES.WAITING) {
+                this.showLobby();
+            } else if (this.gameState === GAME_CONFIG.GAME_STATES.BUILDING) {
+                this.showHUD('buildPhaseHUD');
+            } else if (this.gameState === GAME_CONFIG.GAME_STATES.PLAYING) {
+                this.showHUD('gameHUD');
+                this.updateTurnDisplay();
+            }
+
+            this.showError('Reconnected successfully!', 'success');
+        });
+
+        this.socket.on('playerReconnected', (data) => {
+            console.log(`Player ${data.playerNumber} reconnected`);
+            this.showError(`Player ${data.playerNumber} reconnected!`, 'info');
         });
         
         this.socket.on('playerJoined', (data) => {
@@ -852,6 +921,17 @@ class DoodleDualsGame {
         this.socket.on('turnTimeout', (data) => {
             console.log(`Player ${data.player}'s turn timed out`);
             // The server will auto-switch turns, so no action needed
+        });
+
+        this.socket.on('stateSync', (data) => {
+            // Periodic state synchronization from server
+            // Update local state to match server state
+            if (data.currentPlayer !== this.currentPlayer) {
+                this.currentPlayer = data.currentPlayer;
+                this.myTurn = (this.currentPlayer === this.playerNumber);
+                this.updateTurnDisplay();
+            }
+            this.gameState = data.gameState;
         });
 
         this.socket.on('gameOver', (data) => {
@@ -968,11 +1048,12 @@ class DoodleDualsGame {
 
     showGameOver(data) {
         this.showScreen('gameOverScreen');
-        
+        this.clearSession(); // Clear session since game is over
+
         const isWinner = data.winner === this.playerNumber;
         const title = document.getElementById('gameOverTitle');
         const message = document.getElementById('gameOverMessage');
-        
+
         if (isWinner) {
             title.textContent = '🎉 You Win!';
             title.style.color = '#2ecc71';

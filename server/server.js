@@ -32,6 +32,58 @@ app.use('/shared', express.static(path.join(__dirname, '../shared')));
 // Store game rooms
 const gameRooms = new Map();
 
+// Store disconnected players for reconnection (temporary storage)
+const disconnectedPlayers = new Map(); // socketId -> { roomCode, playerNumber, timestamp }
+
+// Rate limiting - track player actions to prevent spam
+const playerRateLimits = new Map();
+
+// Rate limiter configuration
+const RATE_LIMITS = {
+  placeBlock: { maxActions: 20, windowMs: 5000 }, // 20 blocks per 5 seconds
+  shoot: { maxActions: 3, windowMs: 10000 }, // 3 shots per 10 seconds
+  general: { maxActions: 50, windowMs: 5000 } // 50 general actions per 5 seconds
+};
+
+// Reconnection timeout (30 seconds)
+const RECONNECTION_TIMEOUT = 30000;
+
+// Rate limiting function
+function checkRateLimit(playerId, action) {
+  if (!playerRateLimits.has(playerId)) {
+    playerRateLimits.set(playerId, {});
+  }
+
+  const playerLimits = playerRateLimits.get(playerId);
+  const limit = RATE_LIMITS[action] || RATE_LIMITS.general;
+  const now = Date.now();
+
+  if (!playerLimits[action]) {
+    playerLimits[action] = { count: 1, windowStart: now };
+    return true;
+  }
+
+  const timeElapsed = now - playerLimits[action].windowStart;
+
+  if (timeElapsed > limit.windowMs) {
+    // Reset window
+    playerLimits[action] = { count: 1, windowStart: now };
+    return true;
+  }
+
+  if (playerLimits[action].count >= limit.maxActions) {
+    return false; // Rate limit exceeded
+  }
+
+  playerLimits[action].count++;
+  return true;
+}
+
+// Clean up rate limit data for disconnected players
+function cleanupRateLimit(playerId) {
+  playerRateLimits.delete(playerId);
+}
+
 // Generate random room code
 function generateRoomCode() {
   return Math.random().toString(36).substring(2, 8).toUpperCase();
@@ -46,6 +98,7 @@ function createGameRoom(roomCode) {
     currentPlayer: 0,
     buildTimer: null,
     turnTimer: null,
+    syncInterval: null,
     blocks: {
       player1: [],
       player2: []
@@ -54,6 +107,7 @@ function createGameRoom(roomCode) {
       player1: null,
       player2: null
     },
+    projectiles: [], // Track active projectiles for validation
     score: {
       player1: 0,
       player2: 0
@@ -150,6 +204,12 @@ io.on('connection', (socket) => {
 
   // Handle block placement
   socket.on('placeBlock', (data) => {
+    // Rate limiting check
+    if (!checkRateLimit(socket.id, 'placeBlock')) {
+      socket.emit('error', { message: 'Too many actions. Please slow down.' });
+      return;
+    }
+
     const room = gameRooms.get(socket.roomCode);
     if (!room || room.gameState !== GAME_CONFIG.GAME_STATES.BUILDING) return;
 
@@ -225,6 +285,12 @@ io.on('connection', (socket) => {
 
   // Handle slingshot shot
   socket.on('shoot', (data) => {
+    // Rate limiting check
+    if (!checkRateLimit(socket.id, 'shoot')) {
+      socket.emit('error', { message: 'Too many shots. Please wait.' });
+      return;
+    }
+
     const room = gameRooms.get(socket.roomCode);
     if (!room || room.gameState !== GAME_CONFIG.GAME_STATES.PLAYING) return;
 
@@ -237,13 +303,30 @@ io.on('connection', (socket) => {
       room.turnTimer = null;
     }
 
+    // Track projectile for server-side validation
+    const projectileId = `${socket.id}-${Date.now()}`;
+    const projectile = {
+      id: projectileId,
+      playerNumber: player.playerNumber,
+      startPos: data.startPos,
+      velocity: data.velocity,
+      timestamp: Date.now()
+    };
+    room.projectiles.push(projectile);
+
+    // Remove projectile after lifetime expires
+    setTimeout(() => {
+      room.projectiles = room.projectiles.filter(p => p.id !== projectileId);
+    }, GAME_CONFIG.SLINGSHOT.projectileLifetime);
+
     // Broadcast shot to all players
     io.to(socket.roomCode).emit('shot', {
       playerId: socket.id,
       playerNumber: player.playerNumber,
       trajectory: data,
       startPos: data.startPos,
-      velocity: data.velocity
+      velocity: data.velocity,
+      projectileId: projectileId
     });
 
     // Switch turns after a delay (to allow shot to complete)
@@ -255,15 +338,110 @@ io.on('connection', (socket) => {
   // Handle treasure destruction (win condition)
   socket.on('treasureDestroyed', (data) => {
     const room = gameRooms.get(socket.roomCode);
-    if (!room) return;
-    
+    if (!room || room.gameState !== GAME_CONFIG.GAME_STATES.PLAYING) return;
+
+    // Validate the egg destruction
+    const destroyedEggPlayer = data.eggPlayer;
     const winnerNumber = data.destroyedBy;
+
+    // Basic validation
+    if (!destroyedEggPlayer || !winnerNumber) {
+      console.log('Invalid treasure destruction data');
+      return;
+    }
+
+    // Check that winner and destroyed egg are different players
+    if (destroyedEggPlayer === winnerNumber) {
+      console.log('Player cannot destroy their own egg for a win');
+      return;
+    }
+
+    // Verify treasure exists for the destroyed player
+    const treasureKey = `player${destroyedEggPlayer}`;
+    if (!room.treasures[treasureKey]) {
+      console.log('Treasure does not exist');
+      return;
+    }
+
+    // Check if there were any active projectiles from the winning player recently
+    // (projectiles last 8 seconds, so any projectile within last 8 seconds is valid)
+    const now = Date.now();
+    const validProjectile = room.projectiles.some(p =>
+      p.playerNumber === winnerNumber &&
+      (now - p.timestamp) <= GAME_CONFIG.SLINGSHOT.projectileLifetime
+    );
+
+    if (!validProjectile) {
+      console.log('No valid projectile found for egg destruction');
+      socket.emit('error', { message: 'Invalid egg destruction - no projectile detected' });
+      return;
+    }
+
+    // Validation passed - egg destruction is legitimate
     room.gameState = GAME_CONFIG.GAME_STATES.GAME_OVER;
-    
+
+    // Clear sync interval when game ends
+    if (room.syncInterval) {
+      clearInterval(room.syncInterval);
+      room.syncInterval = null;
+    }
+
     io.to(socket.roomCode).emit('gameOver', {
       winner: winnerNumber,
       reason: 'egg_destroyed'
     });
+
+    console.log(`Game over in room ${socket.roomCode}: Player ${winnerNumber} wins!`);
+  });
+
+  // Handle reconnection attempt
+  socket.on('reconnectToRoom', (data) => {
+    const { roomCode, previousSocketId } = data;
+
+    if (!roomCode || !previousSocketId) {
+      socket.emit('error', { message: 'Invalid reconnection data' });
+      return;
+    }
+
+    const room = gameRooms.get(roomCode);
+    const disconnectedInfo = disconnectedPlayers.get(previousSocketId);
+
+    if (!room || !disconnectedInfo) {
+      socket.emit('error', { message: 'Cannot reconnect: room or session not found' });
+      return;
+    }
+
+    // Verify the room code matches
+    if (disconnectedInfo.roomCode !== roomCode) {
+      socket.emit('error', { message: 'Invalid reconnection attempt' });
+      return;
+    }
+
+    // Update player socket ID
+    const player = room.players.find(p => p.playerNumber === disconnectedInfo.playerNumber);
+    if (player) {
+      player.id = socket.id;
+      socket.join(roomCode);
+      socket.roomCode = roomCode;
+
+      // Remove from disconnected list
+      disconnectedPlayers.delete(previousSocketId);
+
+      // Notify player of successful reconnection
+      socket.emit('reconnected', {
+        roomCode: roomCode,
+        playerNumber: disconnectedInfo.playerNumber,
+        gameState: room.gameState,
+        currentPlayer: room.currentPlayer + 1
+      });
+
+      // Notify other players
+      io.to(roomCode).emit('playerReconnected', {
+        playerNumber: disconnectedInfo.playerNumber
+      });
+
+      console.log(`Player ${socket.id} reconnected to room ${roomCode} as Player ${disconnectedInfo.playerNumber}`);
+    }
   });
 
   // Handle disconnection
@@ -273,27 +451,63 @@ io.on('connection', (socket) => {
     if (socket.roomCode) {
       const room = gameRooms.get(socket.roomCode);
       if (room) {
-        // Clear any active timers to prevent memory leaks
-        if (room.buildTimer) {
-          clearTimeout(room.buildTimer);
-          room.buildTimer = null;
-        }
-        if (room.turnTimer) {
-          clearTimeout(room.turnTimer);
-          room.turnTimer = null;
-        }
+        const player = room.players.find(p => p.id === socket.id);
 
-        room.players = room.players.filter(p => p.id !== socket.id);
+        if (player) {
+          // Store disconnection info for potential reconnection
+          disconnectedPlayers.set(socket.id, {
+            roomCode: socket.roomCode,
+            playerNumber: player.playerNumber,
+            timestamp: Date.now()
+          });
 
-        if (room.players.length === 0) {
-          // Delete room if empty
-          gameRooms.delete(socket.roomCode);
-          console.log(`Room ${socket.roomCode} deleted (empty)`);
-        } else {
-          // Notify remaining players
+          // Set timeout to permanently remove player if they don't reconnect
+          setTimeout(() => {
+            const stillDisconnected = disconnectedPlayers.has(socket.id);
+            if (stillDisconnected) {
+              console.log(`Player ${socket.id} did not reconnect, removing permanently`);
+              disconnectedPlayers.delete(socket.id);
+              cleanupRateLimit(socket.id);
+
+              const currentRoom = gameRooms.get(socket.roomCode);
+              if (currentRoom) {
+                // Clear any active timers to prevent memory leaks
+                if (currentRoom.buildTimer) {
+                  clearTimeout(currentRoom.buildTimer);
+                  currentRoom.buildTimer = null;
+                }
+                if (currentRoom.turnTimer) {
+                  clearTimeout(currentRoom.turnTimer);
+                  currentRoom.turnTimer = null;
+                }
+                if (currentRoom.syncInterval) {
+                  clearInterval(currentRoom.syncInterval);
+                  currentRoom.syncInterval = null;
+                }
+
+                currentRoom.players = currentRoom.players.filter(p => p.id !== socket.id);
+
+                if (currentRoom.players.length === 0) {
+                  // Delete room if empty
+                  gameRooms.delete(socket.roomCode);
+                  console.log(`Room ${socket.roomCode} deleted (empty)`);
+                } else {
+                  // Notify remaining players of permanent disconnect
+                  io.to(socket.roomCode).emit('playerLeft', {
+                    playerId: socket.id,
+                    playersCount: currentRoom.players.length
+                  });
+                }
+              }
+            }
+          }, RECONNECTION_TIMEOUT);
+
+          // Notify other players of temporary disconnect
           io.to(socket.roomCode).emit('playerDisconnected', {
             playerId: socket.id,
-            playersCount: room.players.length
+            playerNumber: player.playerNumber,
+            canReconnect: true,
+            timeout: RECONNECTION_TIMEOUT
           });
         }
       }
@@ -358,6 +572,34 @@ function startGamePhase(roomCode) {
     });
     switchTurn(roomCode);
   }, GAME_CONFIG.TURN_DURATION);
+
+  // Start periodic state synchronization (every 5 seconds during gameplay)
+  room.syncInterval = setInterval(() => {
+    syncGameState(roomCode);
+  }, 5000);
+}
+
+// Periodic state synchronization to keep clients in sync
+function syncGameState(roomCode) {
+  const room = gameRooms.get(roomCode);
+  if (!room || room.gameState !== GAME_CONFIG.GAME_STATES.PLAYING) {
+    // Stop sync if game is not in playing state
+    if (room && room.syncInterval) {
+      clearInterval(room.syncInterval);
+      room.syncInterval = null;
+    }
+    return;
+  }
+
+  // Send current game state to all clients
+  io.to(roomCode).emit('stateSync', {
+    currentPlayer: room.currentPlayer + 1,
+    gameState: room.gameState,
+    treasuresExist: {
+      player1: room.treasures.player1 !== null,
+      player2: room.treasures.player2 !== null
+    }
+  });
 }
 
 function switchTurn(roomCode) {
