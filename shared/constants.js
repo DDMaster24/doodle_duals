@@ -44,8 +44,18 @@ const GAME_CONFIG = {
   SLINGSHOT: {
     maxPower: 35,
     position: { x: 100, y: 400 }, // Player 1 position (raised)
-    position2: { x: 1100, y: 400 } // Player 2 position (raised)
-  },  // Game states
+    position2: { x: 1100, y: 400 }, // Player 2 position (raised)
+    detectionRadius: 50, // Distance for slingshot interaction
+    projectileLifetime: 8000 // Milliseconds before projectile is removed
+  },
+
+  // UI timing
+  UI_TIMING: {
+    coinFlipDuration: 3000, // Coin flip screen display time
+    shotDelay: 3000 // Delay before switching turns after shot
+  },
+
+  // Game states
   GAME_STATES: {
     WAITING: 'waiting',
     BUILDING: 'building',

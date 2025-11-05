@@ -72,9 +72,31 @@ class DoodleDualsGame {
             player1: { x: 100, y: GAME_CONFIG.WORLD.height - 200, width: 20, height: 60 },
             player2: { x: GAME_CONFIG.WORLD.width - 100, y: GAME_CONFIG.WORLD.height - 200, width: 20, height: 60 }
         };
-        
+
+        // Setup collision detection for eggs (only once)
+        this.setupCollisionDetection();
+
         // Start render loop
         this.startRenderLoop();
+    }
+
+    setupCollisionDetection() {
+        // Add collision detection for egg fragility - set up only once
+        Matter.Events.on(this.engine, 'collisionStart', (event) => {
+            event.pairs.forEach(pair => {
+                const { bodyA, bodyB } = pair;
+
+                if ((bodyA.isEgg || bodyB.isEgg) && !bodyA.isStatic && !bodyB.isStatic) {
+                    const egg = bodyA.isEgg ? bodyA : bodyB;
+                    const other = bodyA.isEgg ? bodyB : bodyA;
+
+                    // Check impact force
+                    if (other.speed > 2 || other.isProjectile) {
+                        this.breakEgg(egg);
+                    }
+                }
+            });
+        });
     }
 
     startRenderLoop() {
@@ -406,26 +428,9 @@ class DoodleDualsGame {
         body.playerNumber = this.playerNumber;
         body.health = 1; // Very fragile - breaks on any significant impact
         Matter.World.add(this.world, body);
-        
+
         this.treasures[`player${this.playerNumber}`] = body;
-        
-        // Add collision detection for egg fragility
-        Matter.Events.on(this.engine, 'collisionStart', (event) => {
-            event.pairs.forEach(pair => {
-                const { bodyA, bodyB } = pair;
-                
-                if ((bodyA.isEgg || bodyB.isEgg) && !bodyA.isStatic && !bodyB.isStatic) {
-                    const egg = bodyA.isEgg ? bodyA : bodyB;
-                    const other = bodyA.isEgg ? bodyB : bodyA;
-                    
-                    // Check impact force
-                    if (other.speed > 2 || other.isProjectile) {
-                        this.breakEgg(egg);
-                    }
-                }
-            });
-        });
-        
+
         return body;
     }
 
@@ -465,20 +470,24 @@ class DoodleDualsGame {
         const points = [];
         const timeStep = 0.1;
         const maxTime = 3.0;
-        
+
+        // Use Matter.js gravity value directly - no arbitrary multiplier
+        const gravity = GAME_CONFIG.PHYSICS.gravity;
+
         for (let t = 0; t < maxTime; t += timeStep) {
             const x = startX + velocityX * t;
-            const y = startY + velocityY * t + 0.5 * GAME_CONFIG.PHYSICS.gravity * 10 * t * t;
-            
+            // Standard physics formula: y = y0 + vy*t + 0.5*g*t^2
+            const y = startY + velocityY * t + 0.5 * gravity * t * t;
+
             points.push({ x, y });
-            
+
             // Stop if trajectory goes off screen or hits ground
-            if (x < 0 || x > GAME_CONFIG.WORLD.width || 
+            if (x < 0 || x > GAME_CONFIG.WORLD.width ||
                 y > GAME_CONFIG.WORLD.height - GAME_CONFIG.WORLD.groundHeight) {
                 break;
             }
         }
-        
+
         return points;
     }
 
@@ -511,13 +520,16 @@ class DoodleDualsGame {
             startPos: { x: slingshot.x, y: slingshot.y - 30 }
         });
         
-        // Remove projectile after some time
+        // Remove projectile after some time to prevent indefinite flight
+        const projectileRef = this.projectile;
         setTimeout(() => {
-            if (this.projectile) {
-                Matter.World.remove(this.world, this.projectile);
-                this.projectile = null;
+            if (projectileRef && Matter.Composite.get(this.world, projectileRef.id, 'body')) {
+                Matter.World.remove(this.world, projectileRef);
+                if (this.projectile === projectileRef) {
+                    this.projectile = null;
+                }
             }
-        }, 8000); // Longer time for increased range
+        }, GAME_CONFIG.SLINGSHOT.projectileLifetime);
     }
 
     // Event handlers
@@ -671,7 +683,7 @@ class DoodleDualsGame {
             Math.pow(this.mouse.y - slingshot.y, 2)
         );
         
-        if (distance < 50) { // Within slingshot area
+        if (distance < GAME_CONFIG.SLINGSHOT.detectionRadius) { // Within slingshot area
             this.isDraggingSlingshot = true;
         }
     }
@@ -836,7 +848,12 @@ class DoodleDualsGame {
             this.myTurn = (this.currentPlayer === this.playerNumber);
             this.updateTurnDisplay();
         });
-        
+
+        this.socket.on('turnTimeout', (data) => {
+            console.log(`Player ${data.player}'s turn timed out`);
+            // The server will auto-switch turns, so no action needed
+        });
+
         this.socket.on('gameOver', (data) => {
             this.showGameOver(data);
         });
@@ -880,7 +897,7 @@ class DoodleDualsGame {
             document.querySelectorAll('.screen').forEach(screen => {
                 screen.classList.remove('active');
             });
-        }, 3000);
+        }, GAME_CONFIG.UI_TIMING.coinFlipDuration);
     }
 
     startBuildPhase(data) {
@@ -943,10 +960,10 @@ class DoodleDualsGame {
         
         // Remove after time
         setTimeout(() => {
-            if (opponentProjectile) {
+            if (opponentProjectile && Matter.Composite.get(this.world, opponentProjectile.id, 'body')) {
                 Matter.World.remove(this.world, opponentProjectile);
             }
-        }, 8000);
+        }, GAME_CONFIG.SLINGSHOT.projectileLifetime);
     }
 
     showGameOver(data) {
